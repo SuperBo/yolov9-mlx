@@ -1,0 +1,32 @@
+[project]
+name = "yolov9-mlx"
+version = "0.1.0"
+description = "Yolov9 model in MLX"
+authors = [
+    {name = "SuperBo", email = "supernbo@gmail.com"},
+]
+dependencies = [
+    "mlx>=0.5",
+    "numpy>=1.25",
+]
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.dev-dependencies]
+test = [
+    "pytest>=7.4",
+]
+[tool.pyright]
+include = ["src"]
+exclude = [".venv"]
+venvPath = "."
+venv = ".venv"
