@@ -12,10 +12,17 @@ class YoloBase(nn.Module):
     def __init__(self, num_classes: int = 80, layers: list[LayerDefinition] = []):
         super().__init__()
         self.num_classes = num_classes
-        self.layers = layers
+
+        layers_, layer_inputs = [], []
+        for i, l in layers:
+            layer_inputs.append(i)
+            layers_.append(l)
+        self.layers = layers_
+        self.layer_inputs = layer_inputs
+        self.num_layers = len(layers_)
 
         save_layers = set() # layers needed to be saved in forward process
-        for inputs, _ in self.layers:
+        for inputs in layer_inputs:
             if isinstance(inputs, Iterable):
                 for i in inputs:
                     save_layers.add(i)
@@ -29,7 +36,7 @@ class YoloBase(nn.Module):
         ys = {}
         xi = x
 
-        for i, (inputs, l) in enumerate(self.layers):
+        for i, inputs, l in zip(range(self.num_layers), self.layer_inputs, self.layers):
             if inputs is None:
                 xi = x
             elif isinstance(inputs, Iterable):
@@ -44,9 +51,13 @@ class YoloBase(nn.Module):
 
         return xi
 
-    def train(self, mode: bool = True) -> None:
-        for _, l in self.layers:
-            l.train(mode)
+    # def train(self, mode: bool = True) -> None:
+    #     for l in self.layers:
+    #         l.train(mode)
+    #     super().train(mode)
+    #
+    # def eval(self) -> None:
+    #     self.train(False)
 
 
 class Yolov9(YoloBase):

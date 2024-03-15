@@ -164,7 +164,7 @@ def convert_weight_torch_to_mx(torch_model, mx_model: yolo.YoloBase):
     if n_layers_torch != n_layers + 1:
         raise RuntimeError("Missmatch number of layers {} {}".format(n_layers_torch, n_layers))
 
-    for tlayer, (i, layer) in zip(torch_model.model[1:], mx_model.layers):
+    for tlayer, layer in zip(torch_model.model[1:], mx_model.layers):
         # Make weights conversion
         if isinstance(tlayer, common.Conv) and isinstance(layer, modules.Conv):
             convert_module_conv(tlayer, layer)
@@ -253,8 +253,12 @@ def load_yolov9_model(model_name: str, model_pt: pathlib.Path) -> tuple[Any, yol
     convert_weight_torch_to_mx(torch_model, mx_model)
     print(f"Converted {model_name} to MLX model.")
 
-
     return torch_model, mx_model
+
+
+def save_model(model: yolo.YoloBase, out: str):
+    model.save_weights(out)
+    print("Model saved to " + out)
 
 
 def main():
@@ -278,6 +282,11 @@ def main():
         required=True,
         help="path to yolov9 model pytorch pt file"
     )
+    parser.add_argument(
+        "--out",
+        type=str,
+        help="output safetensor file"
+    )
     args = parser.parse_args()
 
     # Append Yolov9 Path to sys
@@ -285,6 +294,7 @@ def main():
 
     torch_model, mx_model = load_yolov9_model(args.model, pathlib.Path(args.checkpoint))
     verify_loaded_model(torch_model, mx_model)
+    save_model(mx_model, args.out or args.model + ".safetensors")
 
 
 if __name__ == "__main__":
