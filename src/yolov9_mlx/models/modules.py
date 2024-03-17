@@ -385,6 +385,9 @@ class DFL(nn.Module):
         # self.conv.load_weights([
         #     ("weight", mx.arange(in_channels, dtype=mx.float32).reshape(1, 1, 1, -1))
         # ])
+
+        # Replace Original Conv2d kernel (1, 1) in original
+        # with inner product
         self.weight = mx.arange(in_channels, dtype=mx.float32)
 
     def __call__(self, x):
@@ -397,7 +400,10 @@ class DFL(nn.Module):
 
 
 class DualDDetect(nn.Module):
-    """YOLO Detect head for detection models."""
+    """YOLO Detect head for detection models.
+    Used as final layer in dual model which includes
+    one main branch and one auxilary branch.
+    """
 
     def __init__(
         self,
@@ -464,7 +470,7 @@ class DualDDetect(nn.Module):
         self.dfl1 = DFL(self.reg_max)
         self.dfl2 = DFL(self.reg_max)
 
-    def __call__(self, x):
+    def __call__(self, x) -> tuple[mx.array|None, mx.array|None, mx.array, mx.array]:
         d1 = [
             mx.concatenate([conv2(xi), conv3(xi)], axis=-1)
             for conv2, conv3, xi in zip(self.convs2, self.convs3, x[:self.num_layers])
@@ -503,3 +509,82 @@ class DualDDetect(nn.Module):
         y1 = mx.concatenate([dbox1, mx.sigmoid(cls1)], axis=-1)
         y2 = mx.concatenate([dbox2, mx.sigmoid(cls2)], axis=-1)
         return y1, y2, d1, d2
+
+
+class DDetect(nn.Module):
+    """YOLO Detect head for detection models.
+    Used as final layer in single model which
+    includes only main branch after removing auxilary branch.
+    """
+    def __init__(
+        self,
+        num_classes: int,
+        channels: list[int] = [],
+        stride: list[int] = [],
+        inplace: bool = True,
+    ) -> None:
+        super().__init__()
+
+        self._shape = None
+
+        self.num_classes = num_classes
+        self.num_layers = len(channels) # number of detection layers
+        self.reg_max = 16
+
+        self.num_outputs_per_anchor = num_classes + self.reg_max * 4
+        self.inplace = inplace
+
+        if stride:
+            assert len(stride) == self.num_layers
+            self.stride = mx.array(stride, dtype=mx.float32)
+        else:
+            self.stride = mx.zeros(self.num_layers, dtype=mx.float32)
+
+        channels_2 = make_divisible(max((channels[0] // 4, self.reg_max * 4, 16)), 4)
+        channels_3 = max((channels[0], min((self.num_classes * 2, 128))))
+
+        self.convs2 = [
+            nn.Sequential(
+                Conv(c, channels_2, 3, 1),
+                Conv(channels_2, channels_2, 3, 1, groups=4),
+                ExtendedConv2d(channels_2, 4 * self.reg_max, 1, groups=4)
+            )
+            for c in channels[:self.num_layers]
+        ]
+        self.convs3 = [
+            nn.Sequential(
+                Conv(c, channels_3, 3),
+                Conv(channels_3, channels_3, 3),
+                nn.Conv2d(channels_3, self.num_classes, 1)
+            )
+            for c in channels[:self.num_layers]
+        ]
+
+        self.dfl = DFL(self.reg_max)
+
+    def __call__(self, x) -> tuple[mx.array | None, mx.array]:
+        d = [
+            mx.concatenate([conv2(xi), conv3(xi)], axis=-1)
+            for conv2, conv3, xi in zip(self.convs2, self.convs3, x[:self.num_layers])
+        ]
+
+        if self.training:
+            return None, d
+
+        # TODO: cache different cache size
+        shape = x[0].shape #BHWC
+        if self._shape != shape:
+            anchors, strides = utils.make_anchors(d, self.stride, 0.5)
+            self._anchors = anchors
+            self._strides = strides
+            self._shape = shape
+
+        a = mx.concatenate([di.reshape(shape[0], -1, self.num_outputs_per_anchor) for di in d], axis=1)
+        box, cls_ = mx.split(a, [self.reg_max * 4], axis=-1)
+
+        distance = self.dfl(box)
+        dbox = utils.dist2bbox(distance, self._anchors[None, :], xywh=True, axis=-1)
+        dbox = dbox * self._strides
+
+        y = mx.concatenate([dbox, mx.sigmoid(cls_)], axis=-1)
+        return y, d

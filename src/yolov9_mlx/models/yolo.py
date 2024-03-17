@@ -7,75 +7,25 @@ from yolov9_mlx.models import modules
 LayerDefinition = tuple[None | int | Iterable[int], nn.Module]
 
 
-class YoloBase(nn.Module):
-    """Base class for all Yolo Models."""
-    def __init__(self, num_classes: int = 80, layers: list[LayerDefinition] = []):
-        super().__init__()
-        self.num_classes = num_classes
-
-        layers_, layer_inputs = [], []
-        for i, l in layers:
-            layer_inputs.append(i)
-            layers_.append(l)
-        self.layers = layers_
-        self.layer_inputs = layer_inputs
-        self.num_layers = len(layers_)
-
-        save_layers = set() # layers needed to be saved in forward process
-        for inputs in layer_inputs:
-            if isinstance(inputs, Iterable):
-                for i in inputs:
-                    save_layers.add(i)
-            elif isinstance(inputs, int) and inputs != -1: # scalar
-                save_layers.add(inputs)
-
-        save_layers.remove(-1)
-        self.save_layers = save_layers
-
-    def __call__(self, x):
-        ys = {}
-        xi = x
-
-        for i, inputs, l in zip(range(self.num_layers), self.layer_inputs, self.layers):
-            if inputs is None:
-                xi = x
-            elif isinstance(inputs, Iterable):
-                xi = [ys[j] if j != -1 else xi for j in inputs]
-            elif isinstance(inputs, int) and inputs != -1:
-                xi = ys[inputs]
-
-            # compute
-            xi = l(xi)
-            if i in self.save_layers:
-                ys[i] = xi
-
-        return xi
-
-    # def train(self, mode: bool = True) -> None:
-    #     for l in self.layers:
-    #         l.train(mode)
-    #     super().train(mode)
-    #
-    # def eval(self) -> None:
-    #     self.train(False)
-
-
-class Yolov9(YoloBase):
-    """YOLOv9 original model.
-
-    Adapts from original yolov9/models/detect/yolov9.yaml.
+class Yolov9Factory:
+    """Factory class to create layers in Base Yolov9 model.
     """
-    def __init__(self, num_classes: int = 80):
-        super().__init__(num_classes, self._init_layers(3, num_classes))
+    @staticmethod
+    def create_layers(in_channels: int, num_classes: int) -> tuple[list[LayerDefinition], int, int]:
+        """Creates layers in Yolov9 model.
+        Adapts from original yolov9/models/detect/yolov9.yaml.
 
-        self.depth_multiple = 1.0
-        self.width_multiple = 1.0
-        self.anchors = 3
-        self.in_channels = 3
+        Args:
+            in_channels: Number of input channels.
+            num_classes: Number of detection classes.
 
-    def _init_layers(self, in_channels: int, num_classes: int) -> list[LayerDefinition]:
-        """Initializes layers in Yolo models."""
-        return [
+        Returns:
+            A tuple of following:
+                - List of Layer Definition [(input_layer_idx, layer)]
+                - Index of starting auxilary branch in layer def list.
+                - Index of starting final detect module in layer def list.
+        """
+        layers = [
             ## backbone
 
             # 0. Conv down
@@ -104,7 +54,7 @@ class Yolov9(YoloBase):
             # 10. Up-concat merge
             (-1, nn.Upsample(2, "nearest")),
             # 11. Concat backbone P4
-            ((-1, 6), modules.Concat(-1)), #TODO: check laytout
+            ((-1, 6), modules.Concat(-1)),
             # 12. Elan-2 block
             (-1, modules.RepNCSPELAN4(1024, 512, 512, 256, 1)),
             # 13. Up-concat merge
@@ -166,30 +116,46 @@ class Yolov9(YoloBase):
             ## Detection head
 
             # 37. Dual Detect (A3, A4, A5, P3, P4, P5)
-            ((30, 33, 36, 15, 18, 21), modules.DualDDetect(
-                num_classes, [512, 512, 512, 256, 512, 512], [8, 16, 32]
-            ))
+            (
+                (30, 33, 36, 15, 18, 21),
+                modules.DualDDetect(num_classes, [512, 512, 512, 256, 512, 512], [8, 16, 32])
+            )
         ]
 
+        auxilary_index = 22
+        detection_index = len(layers) - 1
 
-class Yolov9C(YoloBase):
-    """YOLOv9-C model.
+        return layers, auxilary_index, detection_index
 
-    Adapts from original yolov9/models/detect/yolov9-c.yaml.
+    @staticmethod
+    def create_single_head(num_classes: int) -> LayerDefinition:
+        # 37. Single Detect (P3, P4, P5)
+        detect_head = (
+            (15, 18, -1), modules.DDetect(num_classes, [256, 512, 512], [8, 16, 32])
+        )
+        return detect_head
 
-    Changes Conv-Down in Yolov9 to Avg-Conv-Down.
-    """
-    def __init__(self, num_classes: int = 80):
-        super().__init__(num_classes, self._init_layers(3, num_classes))
 
-        self.depth_multiple = 1.0
-        self.width_multiple = 1.0
-        self.anchors = 3
-        self.in_channels = 3
+class Yolov9CFactory:
+    """Factory class to create layers in Yolov9-C model."""
+    @staticmethod
+    def create_layers(in_channels: int, num_classes: int) -> tuple[list[LayerDefinition], int, int]:
+        """Creates layers in Yolov9-C variant model.
+        Changes Conv-Down in Plain Yolov9 to Avg-Conv-Down.
 
-    def _init_layers(self, in_channels: int, num_classes: int) -> list[LayerDefinition]:
-        """Initializes layers in Yolov9-C models."""
-        return [
+        Adapts from original yolov9/models/detect/yolov9-c.yaml.
+
+        Args:
+            in_channels: Number of input channels.
+            num_classes: Number of detection classes.
+
+        Returns:
+            A tuple of following:
+                - List of Layer Definition [(input_layer_idx, layer)]
+                - Index of starting auxilary branch in layer def list.
+                - Index of starting final detect module in layer def list.
+        """
+        layers = [
             ## YOLOv9 backbone
 
             # 0. Conv down
@@ -280,30 +246,46 @@ class Yolov9C(YoloBase):
             ## Detection head
 
             # 37. DualDDetect(A3, A4, A5, P3, P4, P5)
-            ((30, 33, 36, 15, 18, 21),
+            (
+                (30, 33, 36, 15, 18, 21),
                 modules.DualDDetect(num_classes, [512, 512, 512, 256, 512, 512], [8, 16, 32])
             )
         ]
 
+        auxilary_index = 22
+        detection_index = len(layers) - 1
 
-class Yolov9E(YoloBase):
-    """YOLOv9-E model.
+        return layers, auxilary_index, detection_index
 
-    Adapts from original yolov9/models/detect/yolov9-e.yaml.
+    @staticmethod
+    def create_single_head(num_classes: int) -> LayerDefinition:
+        # 37. Single Detect (P3, P4, P5)
+        detect_head = (
+            (15, 18, -1), modules.DDetect(num_classes, [256, 512, 512], [8, 16, 32])
+        )
+        return detect_head
 
-    Deeper than Yolov9 and Yolov9-C.
-    """
-    def __init__(self, num_classes: int = 80):
-        super().__init__(num_classes, self._init_layers(3, num_classes))
 
-        self.depth_multiple = 1.0
-        self.width_multiple = 1.0
-        self.anchors = 3
-        self.in_channels = 3
+class Yolov9EFactory:
+    """Factory class to create layers in Yolov9-E model."""
+    @staticmethod
+    def create_layers(in_channels: int, num_classes: int) -> tuple[list[LayerDefinition], int, int]:
+        """Creates layers in Yolov9-E variant model.
+        Deeper than plain Yolov9 and Yolov9-C.
 
-    def _init_layers(self, in_channels: int, num_classes: int) -> list[LayerDefinition]:
-        """Initializes layers in Yolov9-E models."""
-        return [
+        Adapts from original yolov9/models/detect/yolov9-e.yaml.
+
+        Args:
+            in_channels: Number of input channels.
+            num_classes: Number of detection classes.
+
+        Returns:
+            A tuple of following:
+                - List of Layer Definition [(input_layer_idx, layer)]
+                - Index of starting auxilary branch in layer def list.
+                - Index of ending auxilary branch in layer def list.
+        """
+        layers = [
             ## YOLOv9 backbone
 
             # 0. conv down
@@ -417,7 +399,180 @@ class Yolov9E(YoloBase):
             ## Detection head
 
             # 48. DualDDetect(A3, A4, A5, P3, P4, P5)
-            ((34, 31, 28, 41, 44, 47), modules.DualDDetect(
-                num_classes, [256, 512, 512, 256, 512, 512], [8, 16, 32]
-            ))
+            (
+                (34, 31, 28, 41, 44, 47),
+                modules.DualDDetect(num_classes, [256, 512, 512, 256, 512, 512], [8, 16, 32])
+            )
         ]
+
+        auxilary_index = 28
+        end_index = 35
+        return layers, auxilary_index, end_index
+
+    @staticmethod
+    def create_single_head(num_classes: int) -> LayerDefinition:
+        # 48. Single Detect (P5)
+        detect_head = (
+            (41, 44, -1), modules.DDetect(num_classes, [256, 512, 512], [8, 16, 32])
+        )
+        return detect_head
+
+
+class YoloBase(nn.Module):
+    """Base class for all Yolo Models."""
+    def __init__(
+        self,
+        name: str,
+        num_classes: int = 80,
+        layers: list[LayerDefinition] = [],
+        auxilary_start: int = 0,
+        auxilary_end: int = 0,
+        detection_head: LayerDefinition | None= None
+    ):
+        super().__init__()
+
+        self.__name__ = name
+        self.num_classes = num_classes
+        self._prepare_layers(layers, auxilary_start, auxilary_end, detection_head)
+
+        # Retrieve list of save layer indices
+        save_layers = set() # layers needed to be saved in forward process
+        for inputs in self.layer_inputs:
+            if isinstance(inputs, Iterable):
+                for i in inputs:
+                    save_layers.add(i)
+            elif isinstance(inputs, int) and inputs != -1: # scalar
+                save_layers.add(inputs)
+
+        save_layers.remove(-1)
+        self.save_layers = save_layers
+
+
+    def _prepare_layers(
+        self,
+        layers: list[LayerDefinition],
+        auxilary_start: int,
+        auxilary_end: int,
+        detection_head: LayerDefinition | None
+        ) -> None:
+        """Creates a list of layers, a list of inputs for each layer.
+        And remove Auxilary branch for single model.
+
+        Returns:
+            A tuple of
+                - A list of layers.
+                - A list of input index for each layers.
+        """
+        layers_, layer_inputs = [], []
+
+        for input, l in layers[:auxilary_start]:
+            layer_inputs.append(input)
+            layers_.append(l)
+
+        diff = auxilary_end - auxilary_start
+
+        if detection_head is not None:
+            # replace detection head
+            layers = layers[:-1] + [detection_head]
+
+        for input, l in layers[auxilary_end:]:
+            layers_.append(l)
+            # change inputs indices
+            if isinstance(input, Iterable):
+                new_input = tuple(i - diff if i >= auxilary_start else i for i in input)
+            elif isinstance(input, int):
+                new_input = input - diff if input >= auxilary_start else input
+            else:
+                new_input = input
+            layer_inputs.append(new_input)
+
+        self.layers = layers_
+        self.layer_inputs = layer_inputs
+        self.num_layers = len(layers_)
+        return
+
+
+    def __call__(self, x):
+        ys = {}
+        xi = x
+
+        for i, inputs, l in zip(range(self.num_layers), self.layer_inputs, self.layers):
+            if inputs is None:
+                xi = x
+            elif isinstance(inputs, Iterable):
+                xi = [ys[j] if j != -1 else xi for j in inputs]
+            elif isinstance(inputs, int) and inputs != -1:
+                xi = ys[inputs]
+
+            # compute
+            xi = l(xi)
+            if i in self.save_layers:
+                ys[i] = xi
+
+        return xi
+
+
+class Yolov9(YoloBase):
+    """YOLOv9 original model.
+
+    Adapts from original yolov9/models/detect/yolov9.yaml.
+    """
+    def __init__(self, num_classes: int = 80):
+        """Initializes instance of Yolov9 plain model."""
+        layers, _ , _ = Yolov9Factory.create_layers(3, num_classes)
+        super().__init__("Yolov9", num_classes, layers, len(layers), len(layers))
+
+
+class Yolov9Converted(YoloBase):
+    """YOLOv9 original model which prune auxilary branch.
+    """
+    def __init__(self, num_classes: int = 80):
+        """Initializes instance of Yolov9-converted model."""
+        layers, start, end = Yolov9Factory.create_layers(3, num_classes)
+        detect = Yolov9Factory.create_single_head(num_classes)
+        super().__init__("Yolov9-Converted", num_classes, layers, start, end, detect)
+
+
+class Yolov9C(YoloBase):
+    """YOLOv9-C model.
+
+    Adapts from original yolov9/models/detect/yolov9-c.yaml.
+    Changes Conv-Down in Plain Yolov9 to Avg-Conv-Down.
+    """
+    def __init__(self, num_classes: int = 80):
+        """Initializes instance of Yolov9-C model.
+        """
+        layers, _, _ = Yolov9CFactory.create_layers(3, num_classes)
+        super().__init__("Yolov9-C", num_classes, layers, num_classes, num_classes)
+
+
+class Yolov9CConverted(YoloBase):
+    """YOLOv9-C model which prune auxilary branch.
+    """
+    def __init__(self, num_classes: int = 80):
+        """Initializes instance of Yolov9C-converted model."""
+        layers, start, end = Yolov9CFactory.create_layers(3, num_classes)
+        detect = Yolov9CFactory.create_single_head(num_classes)
+        super().__init__("Yolov9-C-Converted", num_classes, layers, start, end, detect)
+
+
+class Yolov9E(YoloBase):
+    """YOLOv9-E model.
+
+    Adapts from original yolov9/models/detect/yolov9-e.yaml.
+
+    Deeper than Yolov9 and Yolov9-C.
+    """
+    def __init__(self, num_classes: int = 80):
+        layers, _, _ = Yolov9EFactory.create_layers(3, num_classes)
+        super().__init__("Yolov9-E", num_classes, layers, num_classes, num_classes)
+
+
+class Yolov9EConverted(YoloBase):
+    """YOLOv9-E model which prune auxilary branch.
+    """
+    def __init__(self, num_classes: int = 80):
+        """Initializes instance of Yolov9E-converted model."""
+        layers, start, end = Yolov9EFactory.create_layers(3, num_classes)
+        detect = Yolov9EFactory.create_single_head(num_classes)
+        super().__init__("Yolov9-E-Converted", num_classes, layers, start, end, detect)

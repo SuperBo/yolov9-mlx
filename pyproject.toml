@@ -13,10 +13,15 @@ requires-python = ">=3.11"
 readme = "README.md"
 license = {text = "MIT"}
 
+[project.optional-dependencies]
+serving = [
+    "bentoml>=1.2.0",
+    "pillow>=10.0.0",
+]
+
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
-
 
 [tool.pdm]
 distribution = true
@@ -25,6 +30,13 @@ distribution = true
 test = [
     "pytest>=7.4",
 ]
+convert = [
+    "torch>=2.1.0",
+]
+
+[tool.pdm.scripts]
+convert = {call = "yolov9_mlx.cli.convert:main"}
+
 [tool.pyright]
 include = ["src"]
 exclude = [".venv"]
