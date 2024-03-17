@@ -48,3 +48,11 @@ def test_xywh_to_xyxy():
     assert list(box_xy[0]) == [8, 7, 12, 13]
     assert list(box_xy[1]) == [17, 8, 23, 12]
     assert list(box_xy[2]) == [60, 100, 100, 300]
+
+
+def test_make_divisible_by_32():
+    assert detect.make_divisible_by_32(32) == 32
+    assert detect.make_divisible_by_32(34) == 32
+    assert detect.make_divisible_by_32(32+20) == 64
+    assert detect.make_divisible_by_32(600) == 608
+    assert detect.make_divisible_by_32(630) == 640

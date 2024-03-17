@@ -21,7 +21,8 @@ def autopad(kernel_size: int, padding: Optional[int] = None, dilation: int = 1) 
 
 
 def make_divisible(x, divisor):
-    # Returns nearest x divisible by divisor
+    """Returns nearest lower x divisible by divisor
+    """
     if isinstance(divisor, mx.array):
         divisor = int(mx.eval(mx.max(divisor))) # to int
     return (x // divisor) * divisor

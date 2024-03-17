@@ -36,6 +36,7 @@ convert = [
 
 [tool.pdm.scripts]
 convert = {call = "yolov9_mlx.cli.convert:main"}
+serve = {cmd = "bentoml serve yolov9_mlx.serve:YoloService"}
 
 [tool.pyright]
 include = ["src"]

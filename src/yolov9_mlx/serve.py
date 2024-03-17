@@ -1,7 +1,13 @@
+import pathlib
+
 import bentoml
 from PIL.Image import Image
+from mlx import core as mx
+import numpy as np
 
 from yolov9_mlx.models import yolo
+from yolov9_mlx import detect
+from yolov9_mlx.data import coco
 
 
 @bentoml.service(
@@ -10,27 +16,57 @@ from yolov9_mlx.models import yolo
 )
 class YoloService:
     def __init__(self) -> None:
-        model = yolo.Yolov9C()
-        model.load_weights("yolov9-c.safetensors")
+        model = yolo.Yolov9CConverted()
+        model.load_weights("yolov9-c-converted.safetensors")
         model.eval()
-        self.model = model
-        print("Model Yolov9C loaded")
 
-        self.max_dim = 1920
+        self.model = mx.compile(model)
+        print("Model Yolov9-C-Converted loaded")
+
+        self.max_dim = 640
+        self.names = coco.NAMES
 
     @bentoml.api
-    def detect(self, img: Image) -> list[int]:
+    def detect(self, image: Image) -> list[tuple[list[int], str, float]]:
         """Detect object in image."""
-        x = self._resize_image(img)
-        x.img
-        y1, y2, _, _ = self.model()
+        im0 = self._resize_image(image)
+        size0 = im0.size
+        imx = mx.array((np.array(im0)[:, :, :3] / 255.0)[None, :], dtype=mx.float16)
+
+        y, _ = self.model(imx)
+        boxes, classes = detect.batch_non_max_suppression(y)
+
+        boxes = boxes[0]
+        classes = classes[0]
+        if boxes is None:
+            return []
+
+        boxes = detect.scale_boxes(boxes, size0[0], size0[1], image.width, image.height)
+
+        result = []
+        for b, cls_ in zip(boxes, classes):
+            result.append((
+                list(b),
+                self.names[cls_.argmax()],
+                float(cls_.max())
+            ))
+        print(result)
+        return result
 
     def _resize_image(self, img: Image) -> Image:
         """Resizes too large image."""
-        im_width, im_height = img.size
+        width, height = img.size
+        max_dim = max(width, height)
 
-        ratio = self.max_dim / max(im_height, im_width)  # ratio
-        if ratio < 1.0:  # image too large
-            img = img.resize((int(im_width * ratio), int(im_height * ratio)))
+        if max_dim > self.max_dim:
+            r = self.max_dim / max_dim
+            width = int(width * r)
+            height = int(height * r)
 
-        return img
+        new_width = detect.make_divisible_by_32(width)
+        new_height = detect.make_divisible_by_32(height)
+
+        if new_width == width and new_height == height:
+            return img
+
+        return img.resize((new_width, new_height))

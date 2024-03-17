@@ -140,6 +140,7 @@ def batch_non_max_suppression(
         # Single NMS
         box_keep, keep = single_nms(box_xyxy, ascore[cond], iou_threshold, max_detects, max_nms)
 
+        print(box_keep)
         out_boxes.append(box_keep)
         out_classes.append(cls_[cond][keep])
 
@@ -148,6 +149,7 @@ def batch_non_max_suppression(
 
 def clip_boxes(boxes: np.ndarray, width: int, height: int) -> np.ndarray:
     """Clip boxes (xyxy) to image shape (height, width)
+    In addition converting float box to integer box.
 
     Args:
         boxes: array with shape (x, 4)
@@ -158,7 +160,7 @@ def clip_boxes(boxes: np.ndarray, width: int, height: int) -> np.ndarray:
         An array with width and height clipped.
     """
     amax = np.array([width, height, width, height])
-    return np.clip(boxes, 0, amax)
+    return np.clip(boxes, 0, amax).astype(np.uint32)
 
 
 def scale_boxes(
@@ -183,3 +185,10 @@ def scale_boxes(
 
     new_boxes = (boxes - np.array([pad_x, pad_y, pad_x, pad_y])) / gain
     return clip_boxes(new_boxes, w1, h1)
+
+
+def make_divisible_by_32(value: int) -> int:
+    """Returns nearest value divisible by 32.
+    Used for calculate resize size.
+    """
+    return ((value + 16) // 32) * 32
